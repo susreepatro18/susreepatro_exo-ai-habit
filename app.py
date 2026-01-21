@@ -25,6 +25,8 @@ def load_model():
     if model is None or feature_cols is None:
         model = joblib.load(os.path.join(BASE_DIR, "habitability_model.pkl"))
         feature_cols = joblib.load(os.path.join(BASE_DIR, "model_features.pkl"))
+        print("✅ Model loaded")
+        print("📌 Model features:", feature_cols)
 
 # ======================
 # Database helpers
@@ -68,22 +70,47 @@ def predict():
         load_model()
         data = request.get_json(silent=True)
 
+        print("🟦 Incoming data:", data)
+
         if not data:
             return jsonify({"error": "No input data"}), 200
 
-        # 🔑 CRITICAL FIX: use model feature order
-        try:
-            X = np.array([[
-                float(data[col]) for col in feature_cols
-            ]])
-        except KeyError as e:
-            print("Missing feature:", e)
-            return jsonify({"error": f"Missing feature {str(e)}"}), 200
-        except ValueError:
-            return jsonify({"error": "Invalid input values"}), 200
+        # ----------------------
+        # Normalize input keys
+        # ----------------------
+        normalized = {k.strip().lower(): v for k, v in data.items()}
 
+        # ----------------------
+        # Build feature vector safely
+        # ----------------------
+        missing = []
+        values = []
+
+        for col in feature_cols:
+            key = col.strip().lower()
+            if key not in normalized:
+                missing.append(col)
+            else:
+                values.append(float(normalized[key]))
+
+        if missing:
+            print("❌ Missing features:", missing)
+            return jsonify({
+                "error": "Missing features",
+                "missing": missing
+            }), 200
+
+        X = np.array([values])
+        print("🟩 Feature vector:", X)
+
+        # ----------------------
+        # Prediction
+        # ----------------------
         score = float(model.predict_proba(X)[0][1])
 
+        # ----------------------
+        # Save to DB
+        # ----------------------
         conn = get_db()
         conn.execute("""
             INSERT INTO predictions (
@@ -92,18 +119,18 @@ def predict():
                 pl_insol, st_teff, st_mass, st_rad, st_met, score
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
-            data["pl_rade"],
-            data["pl_bmasse"],
-            data["pl_eqt"],
-            data["pl_density"],
-            data["pl_orbper"],
-            data["pl_orbsmax"],
-            data["st_luminosity"],
-            data["pl_insol"],
-            data["st_teff"],
-            data["st_mass"],
-            data["st_rad"],
-            data["st_met"],
+            normalized.get("pl_rade"),
+            normalized.get("pl_bmasse"),
+            normalized.get("pl_eqt"),
+            normalized.get("pl_density"),
+            normalized.get("pl_orbper"),
+            normalized.get("pl_orbsmax"),
+            normalized.get("st_luminosity"),
+            normalized.get("pl_insol"),
+            normalized.get("st_teff"),
+            normalized.get("st_mass"),
+            normalized.get("st_rad"),
+            normalized.get("st_met"),
             score
         ))
         conn.commit()
@@ -115,5 +142,36 @@ def predict():
         }), 200
 
     except Exception as e:
-        print("PREDICT ERROR:", e)
+        print("🔥 PREDICT ERROR:", e)
         return jsonify({"error": "Prediction failed"}), 200
+
+@app.route("/ranking", methods=["GET"])
+def ranking():
+    try:
+        conn = get_db()
+        df = pd.read_sql("""
+            SELECT
+                pl_rade, pl_bmasse, pl_eqt, pl_density,
+                pl_orbper, pl_orbsmax, st_luminosity,
+                pl_insol, st_teff, st_mass, st_rad, st_met,
+                score
+            FROM predictions
+            ORDER BY score DESC
+            LIMIT 10
+        """, conn)
+        conn.close()
+
+        if df.empty:
+            return jsonify([]), 200
+
+        return jsonify(df.to_dict(orient="records")), 200
+
+    except Exception as e:
+        print("🔥 RANKING ERROR:", e)
+        return jsonify([]), 200
+
+# ======================
+# Local run only
+# ======================
+if __name__ == "__main__":
+    app.run(debug=True)
