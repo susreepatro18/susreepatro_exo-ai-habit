@@ -1,3 +1,4 @@
+import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import sqlite3
@@ -5,11 +6,16 @@ import joblib
 import numpy as np
 import pandas as pd
 
+# ======================
+# App setup
+# ======================
 app = Flask(__name__)
 CORS(app)
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # ======================
-# Load model & features
+# Lazy-loaded model
 # ======================
 model = None
 feature_cols = None
@@ -20,21 +26,14 @@ def load_model():
         model = joblib.load(os.path.join(BASE_DIR, "habitability_model.pkl"))
         feature_cols = joblib.load(os.path.join(BASE_DIR, "model_features.pkl"))
 
-
-DB_NAME = "exoplanets.db"
-
+DB_NAME = os.path.join(BASE_DIR, "exoplanets.db")
 
 # ======================
-# Database helpers
+# Database helpers (serverless-safe)
 # ======================
 def get_db():
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
-    return conn
-
-
-def init_db():
-    conn = get_db()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS predictions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,11 +53,7 @@ def init_db():
         )
     """)
     conn.commit()
-    conn.close()
-
-
-init_db()
-
+    return conn
 
 # ======================
 # Routes
@@ -67,13 +62,12 @@ init_db()
 def home():
     return "Backend is running successfully!"
 
-
-@app.route("/predict", methods=["GET","POST"])
+@app.route("/predict", methods=["POST"])
 def predict():
     try:
-        data = request.json
+        load_model()   # ✅ THIS IS WHERE IT GOES
 
-        # Build feature vector safely
+        data = request.json
         X = np.array([[float(data[col]) for col in feature_cols]])
         score = float(model.predict_proba(X)[0][1])
 
@@ -99,7 +93,6 @@ def predict():
             data["st_met"],
             score
         ))
-
         conn.commit()
         conn.close()
 
@@ -111,7 +104,6 @@ def predict():
     except Exception as e:
         print("PREDICT ERROR:", e)
         return jsonify({"error": str(e)}), 500
-
 
 @app.route("/ranking", methods=["GET"])
 def ranking():
@@ -131,14 +123,14 @@ def ranking():
         if df.empty:
             return jsonify([])
 
-        # Remove duplicate rows (keep first occurrence of each unique combination)
-        df_unique = df.drop_duplicates(subset=['pl_rade', 'pl_bmasse', 'pl_eqt', 'pl_density',
-                                                'pl_orbper', 'pl_orbsmax', 'st_luminosity',
-                                                'pl_insol', 'st_teff', 'st_mass', 'st_rad', 'st_met'],
-                                       keep='first')
-        
-        # Limit to top 10 results
-        df_unique = df_unique.head(10)
+        df_unique = df.drop_duplicates(
+            subset=[
+                'pl_rade', 'pl_bmasse', 'pl_eqt', 'pl_density',
+                'pl_orbper', 'pl_orbsmax', 'st_luminosity',
+                'pl_insol', 'st_teff', 'st_mass', 'st_rad', 'st_met'
+            ],
+            keep='first'
+        ).head(10)
 
         return jsonify(df_unique.to_dict(orient="records"))
 
@@ -146,10 +138,8 @@ def ranking():
         print("RANKING ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
-
 # ======================
-# Run server
+# Run server (local only)
 # ======================
 if __name__ == "__main__":
     app.run(debug=True)
-
