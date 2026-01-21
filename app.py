@@ -71,44 +71,24 @@ def home():
 def predict():
     try:
         load_model()
-        data = request.get_json(silent=True)
 
+        data = request.get_json(silent=True)
         if not data:
             return jsonify({"error": "No input data"}), 400
 
-        # 🔑 FRONTEND → MODEL KEY MAP
-        key_map = {
-            "planetRadius": "pl_rade",
-            "planetMass": "pl_bmasse",
-            "equilibriumTemp": "pl_eqt",
-            "planetDensity": "pl_density",
-            "orbitalPeriod": "pl_orbper",
-            "orbitalRadius": "pl_orbsmax",
-            "starLuminosity": "st_luminosity",
-            "insolation": "pl_insol",
-            "starTemperature": "st_teff",
-            "starMass": "st_mass",
-            "starRadius": "st_rad",
-            "metallicity": "st_met"
-        }
+        # Normalize keys
+        normalized = {k.strip().lower(): v for k, v in data.items()}
 
-        # Normalize incoming keys
-        normalized = {}
-        for k, v in data.items():
-            if k in key_map:
-                normalized[key_map[k]] = v
-
-        # Build feature vector in correct order
         values = []
         for col in feature_cols:
             try:
-                values.append(float(normalized.get(col, 0.0)))
-            except Exception:
+                values.append(float(normalized.get(col.lower(), 0.0)))
+            except ValueError:
                 values.append(0.0)
 
-        X = np.array([values])
+        # ✅ CRITICAL FIX: DataFrame, not NumPy
+        X = pd.DataFrame([values], columns=feature_cols)
 
-        # Predict
         if hasattr(model, "predict_proba"):
             score = float(model.predict_proba(X)[0][1])
         else:
@@ -122,6 +102,7 @@ def predict():
     except Exception as e:
         print("🔥 PREDICT ERROR:", e)
         return jsonify({"error": str(e)}), 500
+
 
 
 @app.route("/ranking", methods=["GET"])
