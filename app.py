@@ -68,6 +68,7 @@ def home():
     return app.send_static_file("index.html")
 
 @app.route("/predict", methods=["POST"])
+@app.route("/predict", methods=["POST"])
 def predict():
     try:
         load_model()
@@ -76,10 +77,32 @@ def predict():
         if not data:
             return jsonify({"error": "No input data"}), 200
 
-        normalized = {k.strip().lower(): v for k, v in data.items()}
-        X = np.array([[float(normalized[col.lower()]) for col in feature_cols]])
+        # normalize input keys
+        normalized = {k.strip().lower(): float(v) for k, v in data.items()}
 
-        # 🔑 FINAL SAFE FIX
+        # DEFAULT VALUES (neutral / Earth-like)
+        DEFAULTS = {
+            "pl_rade": 1.0,
+            "pl_bmasse": 1.0,
+            "pl_eqt": 288,
+            "pl_density": 5.5,
+            "pl_orbper": 365,
+            "pl_orbsmax": 1.0,
+            "st_luminosity": 1.0,
+            "pl_insol": 1.0,
+            "st_teff": 5772,
+            "st_mass": 1.0,
+            "st_rad": 1.0,
+            "st_met": 0.0
+        }
+
+        # build feature vector safely (NO KeyError now)
+        X = np.array([[
+            float(normalized.get(col.lower(), DEFAULTS[col]))
+            for col in feature_cols
+        ]])
+
+        # prediction (unchanged logic)
         if hasattr(model, "predict_proba"):
             score = float(model.predict_proba(X)[0][1])
         else:
@@ -87,12 +110,13 @@ def predict():
 
         return jsonify({
             "label": "Habitable" if score >= 0.7 else "Not Habitable",
-            "score": score
+            "score": round(score, 4)
         }), 200
 
     except Exception as e:
         print("🔥 PREDICT ERROR:", e)
-        return jsonify({"error": "Prediction failed"}), 500
+        return jsonify({"error": str(e)}), 500
+
 
 
 @app.route("/ranking", methods=["GET"])
