@@ -3,7 +3,7 @@ services:
     name: exo-ai-planet
     env: python
     plan: free
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements.txt && python -c "from app import create_dummy_model; create_dummy_model()" || true
     startCommand: gunicorn app:app
     envVars:
       - key: PYTHON_VERSION

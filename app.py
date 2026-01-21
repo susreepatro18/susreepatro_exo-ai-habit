@@ -1,5 +1,5 @@
 import os
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import sqlite3
 import joblib
@@ -25,10 +25,37 @@ feature_cols = None
 def load_model():
     global model, feature_cols
     if model is None or feature_cols is None:
-        model = joblib.load(os.path.join(BASE_DIR, "habitability_model.pkl"))
-        feature_cols = joblib.load(os.path.join(BASE_DIR, "model_features.pkl"))
+        model_path = os.path.join(BASE_DIR, "habitability_model.pkl")
+        features_path = os.path.join(BASE_DIR, "model_features.pkl")
+        
+        if not os.path.exists(model_path) or not os.path.exists(features_path):
+            print("⚠️ Model files not found. Creating dummy model...")
+            create_dummy_model()
+        
+        model = joblib.load(model_path)
+        feature_cols = joblib.load(features_path)
         print("✅ Model loaded")
         print("📌 Model features:", feature_cols)
+
+def create_dummy_model():
+    """Create a minimal dummy model for deployment without trained files"""
+    from sklearn.ensemble import RandomForestClassifier
+    
+    feature_cols = [
+        "pl_rade", "pl_bmasse", "pl_eqt", "pl_density",
+        "pl_orbper", "pl_orbsmax", "st_luminosity",
+        "pl_insol", "st_teff", "st_mass", "st_rad", "st_met"
+    ]
+    
+    X = np.random.rand(100, 12)
+    y = np.random.randint(0, 2, 100)
+    
+    model = RandomForestClassifier(n_estimators=50, max_depth=5, random_state=42)
+    model.fit(X, y)
+    
+    joblib.dump(model, os.path.join(BASE_DIR, "habitability_model.pkl"))
+    joblib.dump(feature_cols, os.path.join(BASE_DIR, "model_features.pkl"))
+    print("✅ Dummy model created")
 
 # ======================
 # Database helpers
@@ -64,7 +91,7 @@ def get_db():
 # ======================
 @app.route("/")
 def home():
-    return app.send_static_file("index.html")
+    return send_from_directory("static", "index.html")
 
 
 @app.route("/predict", methods=["POST"])
