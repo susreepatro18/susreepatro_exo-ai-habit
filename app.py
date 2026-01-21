@@ -14,7 +14,6 @@ CORS(app)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Detect Vercel environment
 IS_VERCEL = os.getenv("VERCEL") == "1"
 
 # ======================
@@ -79,18 +78,18 @@ def predict():
         # Normalize keys
         normalized = {k.strip().lower(): v for k, v in data.items()}
 
-        # 🔑 SAFE FEATURE VECTOR (THIS FIXES EVERYTHING)
-        values = []
+        # ✅ BUILD DATAFRAME (CRITICAL FIX)
+        row = {}
         for col in feature_cols:
             key = col.lower()
             try:
-                values.append(float(normalized.get(key, 0.0)))
-            except ValueError:
-                values.append(0.0)
+                row[col] = float(normalized.get(key, 0.0))
+            except Exception:
+                row[col] = 0.0
 
-        X = np.array([values])
+        X = pd.DataFrame([row], columns=feature_cols)
 
-        # Predict safely
+        # Predict
         if hasattr(model, "predict_proba"):
             score = float(model.predict_proba(X)[0][1])
         else:
@@ -98,19 +97,16 @@ def predict():
 
         return jsonify({
             "label": "Habitable" if score >= 0.7 else "Not Habitable",
-            "score": score
+            "score": round(score, 4)
         }), 200
 
     except Exception as e:
-        print("🔥 PREDICT ERROR:", e)
+        print("🔥 PREDICT ERROR:", str(e))
         return jsonify({"error": str(e)}), 500
-
-
 
 @app.route("/ranking", methods=["GET"])
 def ranking():
     try:
-        # SQLite ranking only works locally
         if IS_VERCEL:
             return jsonify([]), 200
 
