@@ -34,8 +34,6 @@ DB_NAME = os.path.join(BASE_DIR, "exoplanets.db")
 def get_db():
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
-
-    # Ensure table always exists (serverless-safe)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS predictions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,7 +53,6 @@ def get_db():
         )
     """)
     conn.commit()
-
     return conn
 
 # ======================
@@ -69,9 +66,32 @@ def home():
 def predict():
     try:
         load_model()
+        data = request.get_json(silent=True)
 
-        data = request.json
-        X = np.array([[float(data[col]) for col in feature_cols]])
+        if not data:
+            return jsonify({"error": "No input data"}), 200
+
+        # 🔑 Feature mapping (frontend → model)
+        feature_map = {
+            "pl_rade": "pl_rade",
+            "pl_bmasse": "pl_bmasse",
+            "pl_eqt": "pl_eqt",
+            "pl_density": "pl_density",
+            "pl_orbper": "pl_orbper",
+            "pl_orbsmax": "pl_orbsmax",
+            "st_luminosity": "st_luminosity",
+            "pl_insol": "pl_insol",
+            "st_teff": "st_teff",
+            "st_mass": "st_mass",
+            "st_rad": "st_rad",
+            "st_met": "st_met"
+        }
+
+        try:
+            X = np.array([[float(data[key]) for key in feature_map]])
+        except Exception as e:
+            return jsonify({"error": "Invalid or missing inputs"}), 200
+
         score = float(model.predict_proba(X)[0][1])
 
         conn = get_db()
@@ -102,17 +122,16 @@ def predict():
         return jsonify({
             "label": "Habitable" if score >= 0.7 else "Not Habitable",
             "score": score
-        })
+        }), 200
 
     except Exception as e:
         print("PREDICT ERROR:", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Prediction failed"}), 200
 
 @app.route("/ranking", methods=["GET"])
 def ranking():
     try:
         conn = get_db()
-
         df = pd.read_sql("""
             SELECT
                 pl_rade, pl_bmasse, pl_eqt, pl_density,
@@ -123,10 +142,8 @@ def ranking():
             ORDER BY score DESC
             LIMIT 10
         """, conn)
-
         conn.close()
 
-        # 🔑 IMPORTANT: empty DB is NOT an error
         if df.empty:
             return jsonify([]), 200
 
@@ -134,7 +151,6 @@ def ranking():
 
     except Exception as e:
         print("RANKING ERROR:", e)
-        # 🔑 Never break frontend
         return jsonify([]), 200
 
 # ======================
