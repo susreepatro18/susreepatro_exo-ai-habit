@@ -14,6 +14,9 @@ CORS(app)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Detect Vercel environment
+IS_VERCEL = os.getenv("VERCEL") == "1"
+
 # ======================
 # Lazy-loaded model
 # ======================
@@ -70,71 +73,47 @@ def predict():
         load_model()
         data = request.get_json(silent=True)
 
-        print("🟦 Incoming data:", data)
-
         if not data:
             return jsonify({"error": "No input data"}), 200
 
-        # ----------------------
-        # Normalize input keys
-        # ----------------------
+        # Normalize keys
         normalized = {k.strip().lower(): v for k, v in data.items()}
 
-        # ----------------------
-        # Build feature vector safely
-        # ----------------------
-        missing = []
-        values = []
+        # Build feature vector in model order
+        X = np.array([[float(normalized[col.lower()]) for col in feature_cols]])
 
-        for col in feature_cols:
-            key = col.strip().lower()
-            if key not in normalized:
-                missing.append(col)
-            else:
-                values.append(float(normalized[key]))
+        # 🔑 SAFE prediction (no logic change)
+        if hasattr(model, "predict_proba"):
+            score = float(model.predict_proba(X)[0][1])
+        else:
+            score = float(model.predict(X)[0])
 
-        if missing:
-            print("❌ Missing features:", missing)
-            return jsonify({
-                "error": "Missing features",
-                "missing": missing
-            }), 200
-
-        X = np.array([values])
-        print("🟩 Feature vector:", X)
-
-        # ----------------------
-        # Prediction
-        # ----------------------
-        score = float(model.predict_proba(X)[0][1])
-
-        # ----------------------
-        # Save to DB
-        # ----------------------
-        conn = get_db()
-        conn.execute("""
-            INSERT INTO predictions (
-                pl_rade, pl_bmasse, pl_eqt, pl_density,
-                pl_orbper, pl_orbsmax, st_luminosity,
-                pl_insol, st_teff, st_mass, st_rad, st_met, score
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (
-            normalized.get("pl_rade"),
-            normalized.get("pl_bmasse"),
-            normalized.get("pl_eqt"),
-            normalized.get("pl_density"),
-            normalized.get("pl_orbper"),
-            normalized.get("pl_orbsmax"),
-            normalized.get("st_luminosity"),
-            normalized.get("pl_insol"),
-            normalized.get("st_teff"),
-            normalized.get("st_mass"),
-            normalized.get("st_rad"),
-            normalized.get("st_met"),
-            score
-        ))
-        conn.commit()
-        conn.close()
+        # 🚫 Skip DB write on Vercel (serverless-safe)
+        if not IS_VERCEL:
+            conn = get_db()
+            conn.execute("""
+                INSERT INTO predictions (
+                    pl_rade, pl_bmasse, pl_eqt, pl_density,
+                    pl_orbper, pl_orbsmax, st_luminosity,
+                    pl_insol, st_teff, st_mass, st_rad, st_met, score
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                normalized.get("pl_rade"),
+                normalized.get("pl_bmasse"),
+                normalized.get("pl_eqt"),
+                normalized.get("pl_density"),
+                normalized.get("pl_orbper"),
+                normalized.get("pl_orbsmax"),
+                normalized.get("st_luminosity"),
+                normalized.get("pl_insol"),
+                normalized.get("st_teff"),
+                normalized.get("st_mass"),
+                normalized.get("st_rad"),
+                normalized.get("st_met"),
+                score
+            ))
+            conn.commit()
+            conn.close()
 
         return jsonify({
             "label": "Habitable" if score >= 0.7 else "Not Habitable",
@@ -143,11 +122,15 @@ def predict():
 
     except Exception as e:
         print("🔥 PREDICT ERROR:", e)
-        return jsonify({"error": "Prediction failed"}), 200
+        return jsonify({"error": "Prediction failed"}), 500
 
 @app.route("/ranking", methods=["GET"])
 def ranking():
     try:
+        # SQLite ranking only works locally
+        if IS_VERCEL:
+            return jsonify([]), 200
+
         conn = get_db()
         df = pd.read_sql("""
             SELECT
