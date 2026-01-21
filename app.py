@@ -66,6 +66,7 @@ def get_db():
 def home():
     return app.send_static_file("index.html")
 
+
 @app.route("/predict", methods=["POST"])
 def predict():
     try:
@@ -75,19 +76,37 @@ def predict():
         if not data:
             return jsonify({"error": "No input data"}), 400
 
-        # Normalize keys
-        normalized = {k.strip().lower(): v for k, v in data.items()}
+        # 🔑 FRONTEND → MODEL KEY MAP
+        key_map = {
+            "planetRadius": "pl_rade",
+            "planetMass": "pl_bmasse",
+            "equilibriumTemp": "pl_eqt",
+            "planetDensity": "pl_density",
+            "orbitalPeriod": "pl_orbper",
+            "orbitalRadius": "pl_orbsmax",
+            "starLuminosity": "st_luminosity",
+            "insolation": "pl_insol",
+            "starTemperature": "st_teff",
+            "starMass": "st_mass",
+            "starRadius": "st_rad",
+            "metallicity": "st_met"
+        }
 
-        # ✅ BUILD DATAFRAME (CRITICAL FIX)
-        row = {}
+        # Normalize incoming keys
+        normalized = {}
+        for k, v in data.items():
+            if k in key_map:
+                normalized[key_map[k]] = v
+
+        # Build feature vector in correct order
+        values = []
         for col in feature_cols:
-            key = col.lower()
             try:
-                row[col] = float(normalized.get(key, 0.0))
+                values.append(float(normalized.get(col, 0.0)))
             except Exception:
-                row[col] = 0.0
+                values.append(0.0)
 
-        X = pd.DataFrame([row], columns=feature_cols)
+        X = np.array([values])
 
         # Predict
         if hasattr(model, "predict_proba"):
@@ -101,8 +120,9 @@ def predict():
         }), 200
 
     except Exception as e:
-        print("🔥 PREDICT ERROR:", str(e))
+        print("🔥 PREDICT ERROR:", e)
         return jsonify({"error": str(e)}), 500
+
 
 @app.route("/ranking", methods=["GET"])
 def ranking():
