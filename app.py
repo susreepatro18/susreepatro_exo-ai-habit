@@ -34,6 +34,8 @@ DB_NAME = os.path.join(BASE_DIR, "exoplanets.db")
 def get_db():
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
+
+    # Ensure table always exists (serverless-safe)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS predictions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,6 +55,7 @@ def get_db():
         )
     """)
     conn.commit()
+
     return conn
 
 # ======================
@@ -109,6 +112,7 @@ def predict():
 def ranking():
     try:
         conn = get_db()
+
         df = pd.read_sql("""
             SELECT
                 pl_rade, pl_bmasse, pl_eqt, pl_density,
@@ -117,26 +121,21 @@ def ranking():
                 score
             FROM predictions
             ORDER BY score DESC
+            LIMIT 10
         """, conn)
+
         conn.close()
 
+        # 🔑 IMPORTANT: empty DB is NOT an error
         if df.empty:
-            return jsonify([])
+            return jsonify([]), 200
 
-        df_unique = df.drop_duplicates(
-            subset=[
-                'pl_rade', 'pl_bmasse', 'pl_eqt', 'pl_density',
-                'pl_orbper', 'pl_orbsmax', 'st_luminosity',
-                'pl_insol', 'st_teff', 'st_mass', 'st_rad', 'st_met'
-            ],
-            keep='first'
-        ).head(10)
-
-        return jsonify(df_unique.to_dict(orient="records"))
+        return jsonify(df.to_dict(orient="records")), 200
 
     except Exception as e:
         print("RANKING ERROR:", e)
-        return jsonify({"error": str(e)}), 500
+        # 🔑 Never break frontend
+        return jsonify([]), 200
 
 # ======================
 # Local run only
