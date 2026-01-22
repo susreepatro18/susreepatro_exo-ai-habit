@@ -4,6 +4,7 @@ const API = window.location.origin;
 /* Collect input data */
 function getInputData() {
     return {
+        pl_name: document.getElementById("pl_name").value || "Unknown",
         pl_rade: parseFloat(document.getElementById("pl_rade").value),
         pl_bmasse: parseFloat(document.getElementById("pl_bmasse").value),
         pl_eqt: parseFloat(document.getElementById("pl_eqt").value),
@@ -47,30 +48,51 @@ function showRanking() {
     fetch(`${API}/ranking`)
     .then(res => res.json())
     .then(data => {
+        console.log("Ranking data:", data);
         const table = document.getElementById("rankTable");
         const tbody = table.querySelector("tbody");
         tbody.innerHTML = "";
 
-        if (!Array.isArray(data) || data.length === 0) {
-            tbody.innerHTML = "<tr><td colspan='14'>No rankings available yet.</td></tr>";
+        // Handle the response object with rankings array
+        let rankings = data.rankings || [];
+        
+        if (!Array.isArray(rankings) || rankings.length === 0) {
+            tbody.innerHTML = "<tr><td colspan='4'>No rankings available yet.</td></tr>";
+            console.log("No rankings found");
         } else {
-            data.forEach((row, i) => {
+            // Remove duplicates - keep only unique confidence scores
+            const seenScores = new Set();
+            const deduplicated = [];
+            
+            rankings.forEach((row) => {
+                const score = parseFloat(row.confidence_score).toFixed(4);
+                if (!seenScores.has(score)) {
+                    seenScores.add(score);
+                    deduplicated.push(row);
+                }
+            });
+            
+            console.log(`Displaying ${deduplicated.length} unique rankings (deduplicated from ${rankings.length})`);
+            deduplicated.forEach((row, i) => {
+                const habitability = row.prediction_value || "N/A";
+                const score = row.confidence_score || 0;
+                
+                // Format date as "date month year" (e.g., "22 January 2026")
+                let date = "N/A";
+                if (row.created_at) {
+                    const dateObj = new Date(row.created_at);
+                    const day = dateObj.getDate();
+                    const month = dateObj.toLocaleString('en-US', { month: 'long' });
+                    const year = dateObj.getFullYear();
+                    date = `${day} ${month} ${year}`;
+                }
+                
                 tbody.innerHTML += `
                     <tr>
                         <td>${i + 1}</td>
-                        <td>${row.pl_rade}</td>
-                        <td>${row.pl_bmasse}</td>
-                        <td>${row.pl_eqt}</td>
-                        <td>${row.pl_density}</td>
-                        <td>${row.pl_orbper}</td>
-                        <td>${row.pl_orbsmax}</td>
-                        <td>${row.st_luminosity}</td>
-                        <td>${row.pl_insol}</td>
-                        <td>${row.st_teff}</td>
-                        <td>${row.st_mass}</td>
-                        <td>${row.st_rad}</td>
-                        <td>${row.st_met}</td>
-                        <td>${row.score.toFixed(4)}</td>
+                        <td>${score.toFixed(4)}</td>
+                        <td>${habitability}</td>
+                        <td>${date}</td>
                     </tr>
                 `;
             });
@@ -80,8 +102,8 @@ function showRanking() {
         document.getElementById("closeBtn").classList.remove("hidden");
     })
     .catch(err => {
-        console.error(err);
-        alert("Ranking failed");
+        console.error("Ranking fetch error:", err);
+        alert("Ranking failed: " + err.message);
     });
 }
 
