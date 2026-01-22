@@ -1,6 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+.env
+
+# Virtual environment
+venv/
+
+# Data / training artifacts
 NASA_Exoplanet_dataset.csv
 exoplanets.db
 *.ipynb
 .ipynb_checkpoints/
-__pycache__/
-.env
+
+# OS
+.DS_Store
