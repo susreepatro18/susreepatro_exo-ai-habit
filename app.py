@@ -30,6 +30,23 @@ supabase = None
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
+KEY_MAP = {
+    "planet radius (pl_rade)": "pl_rade",
+    "planet mass (pl_bmasse)": "pl_bmasse",
+    "equilibrium temp (pl_eqt)": "pl_eqt",
+    "density (pl_density)": "pl_density",
+    "orbital period (pl_orbper)": "pl_orbper",
+    "orbit radius (pl_orbsmax)": "pl_orbsmax",
+    "star luminosity": "st_luminosity",
+    "insolation": "pl_insol",
+    "star temperature": "st_teff",
+    "star mass": "st_mass",
+    "star radius": "st_rad",
+    "metallicity": "st_met",
+    "planet name": "pl_name"
+}
+
+
 if create_client and SUPABASE_URL and SUPABASE_KEY:
     try:
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -103,10 +120,8 @@ def health():
         "model_loaded": ok
     }), 200 if ok else 500
 
-
 @app.route("/predict", methods=["POST"])
 def predict():
-    # Ensure model is loaded
     try:
         load_model()
     except Exception as e:
@@ -119,22 +134,25 @@ def predict():
     if not data:
         return jsonify({"error": "No input data"}), 400
 
-    # Normalize input keys to lowercase
-    normalized = {str(k).lower(): v for k, v in data.items()}
+    # Normalize + map frontend keys → model keys
+    normalized = {}
+    for k, v in data.items():
+        key = str(k).lower().strip()
+        mapped_key = KEY_MAP.get(key, key)
+        normalized[mapped_key] = v
 
+    # Build feature vector in training order
     values = []
     missing = []
 
-    # Expect the same feature set as used in training
     for col in feature_cols:
-        key = col.lower()
-        if key not in normalized:
+        if col not in normalized:
             missing.append(col)
             values.append(0.0)
         else:
             try:
-                values.append(float(normalized[key]))
-            except Exception:
+                values.append(float(normalized[col]))
+            except:
                 missing.append(col)
                 values.append(0.0)
 
@@ -146,14 +164,16 @@ def predict():
 
     X = pd.DataFrame([values], columns=feature_cols)
 
-    # Safe prediction
+    # Prediction (drop feature names)
     try:
+        X_input = X.values
+
         if hasattr(model, "predict_proba"):
-            proba = model.predict_proba(X)
+            proba = model.predict_proba(X_input)
             score = float(proba[0][1])
         else:
-            pred = model.predict(X)[0]
-            score = float(pred)
+            score = float(model.predict(X_input)[0])
+
     except Exception as e:
         return jsonify({
             "error": "Model prediction failed",
@@ -163,7 +183,6 @@ def predict():
     label = "Habitable" if score >= 0.7 else "Not Habitable"
     confidence = "High" if score >= 0.7 or score <= 0.3 else "Medium"
 
-    # Optional: log to Supabase (skip on Vercel if you prefer)
     if supabase and not IS_VERCEL:
         try:
             pl_name = normalized.get("pl_name", "Unknown")
@@ -181,7 +200,6 @@ def predict():
         "score": round(score, 4),
         "confidence": confidence
     }), 200
-
 
 @app.route("/ranking", methods=["GET"])
 def ranking():
